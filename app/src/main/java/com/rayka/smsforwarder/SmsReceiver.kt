@@ -24,7 +24,7 @@ class SmsReceiver : BroadcastReceiver() {
 
         val sender = messages[0].displayOriginatingAddress ?: messages[0].originatingAddress ?: "unknown"
         val body = messages.joinToString(separator = "") { it.messageBody ?: "" }
-        val timestamp = messages[0].timestampMillis
+        val timestamp = System.currentTimeMillis()
         val sim = intent.getIntExtra("subscription", intent.getIntExtra("slot", -1))
         val smsKey = "recv:$sender:$timestamp"
 

@@ -24,15 +24,16 @@ object NetworkUtils {
                 caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
     }
 
-    private fun supabaseHeaders(): Map<String, String> {
+    /** The edge function checks the shared secret in the X-Tasker-Secret header. */
+    private fun secretHeaders(): Map<String, String> {
         val key = Prefs.supabaseKey.trim()
         if (key.isEmpty()) return emptyMap()
-        return mapOf("apikey" to key, "Authorization" to "Bearer $key")
+        return mapOf("X-Tasker-Secret" to key)
     }
 
-    /** Posts JSON to the main (Supabase) server, automatically attaching the shared key as headers. */
+    /** Posts JSON to the main (Supabase) server, automatically attaching the shared secret header. */
     fun postJsonMain(json: JSONObject): Boolean =
-        postJson(Prefs.mainUrl, json, DEFAULT_TIMEOUT_MS, supabaseHeaders())
+        postJson(Prefs.mainUrl, json, DEFAULT_TIMEOUT_MS, secretHeaders())
 
     /** Posts JSON to the local fallback server. No auth headers — it's on the local network. */
     fun postJsonLocal(json: JSONObject): Boolean =
@@ -93,6 +94,6 @@ object NetworkUtils {
         }
     }
 
-    fun getOutgoingMain(): JSONArray? = getJsonArray(Prefs.outgoingMainUrl, DEFAULT_TIMEOUT_MS, supabaseHeaders())
+    fun getOutgoingMain(): JSONArray? = getJsonArray(Prefs.outgoingMainUrl, DEFAULT_TIMEOUT_MS, secretHeaders())
     fun getOutgoingLocal(): JSONArray? = getJsonArray(Prefs.outgoingLocalUrl, DEFAULT_TIMEOUT_LOCAL_MS, emptyMap())
 }

@@ -52,7 +52,15 @@ object Prefs {
 
     // Timestamp (ms) of the newest SMS we have already processed/inserted.
     var lastSmsTimestamp: Long
-        get() = sp.getLong(KEY_LAST_SMS_TS, 0L)
+        get() {
+            // First run: start from "now" so the old inbox history is not imported.
+            if (!sp.contains(KEY_LAST_SMS_TS)) {
+                val now = System.currentTimeMillis()
+                sp.edit().putLong(KEY_LAST_SMS_TS, now).apply()
+                return now
+            }
+            return sp.getLong(KEY_LAST_SMS_TS, 0L)
+        }
         set(v) = sp.edit().putLong(KEY_LAST_SMS_TS, v).apply()
 
     /** Raw comma-separated list of buoy phone numbers, exactly as entered by the user. */

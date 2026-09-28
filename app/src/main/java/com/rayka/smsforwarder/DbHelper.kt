@@ -160,6 +160,22 @@ class DbHelper(context: Context) : SQLiteOpenHelper(context.applicationContext, 
         )
     }
 
+    /** True if the same body from the same sender (any number format) is already stored within [windowMs] of [receivedAt]. */
+    fun existsSimilar(sender: String, body: String, receivedAt: Long, windowMs: Long = 600_000L): Boolean {
+        synchronized(lock) {
+            val target = PhoneUtils.normalize(sender)
+            readableDatabase.rawQuery(
+                "SELECT sender FROM $TABLE WHERE body=? AND received_at BETWEEN ? AND ?",
+                arrayOf(body, (receivedAt - windowMs).toString(), (receivedAt + windowMs).toString())
+            ).use { c ->
+                while (c.moveToNext()) {
+                    if (PhoneUtils.normalize(c.getString(0) ?: "") == target) return true
+                }
+            }
+            return false
+        }
+    }
+
     // ---------- Outgoing messages (server -> phone -> SMS to buoy) ----------
 
     /** Returns true if this remote command id was already handled (prevents double-sending). */

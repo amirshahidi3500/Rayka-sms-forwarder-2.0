@@ -3,6 +3,7 @@ package com.rayka.smsforwarder
 import android.content.Context
 import android.provider.Telephony
 import org.json.JSONObject
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Central place for all "what happens to one incoming SMS" logic, shared by the live
@@ -16,7 +17,16 @@ object MessageSync {
     // as a public constant on Telephony.Sms, so we reference it by raw name.
     private const val COLUMN_SUB_ID = "sub_id"
 
+    private val insertLock = Any()
+
+    // Retry backoff for messages the main server did not accept (seconds).
+    private val BACKOFF_STEPS_SEC = longArrayOf(3, 10, 30, 60, 120, 300)
+    private val nextRetryAt = ConcurrentHashMap<Long, Long>()
+    private val failCount = ConcurrentHashMap<Long, Int>()
+
     private fun payloadFor(r: MessageRecord): JSONObject = JSONObject().apply {
+        // "sms" is the field the ingest-buoy-sms edge function parses.
+        put("sms", r.body)
         put("sender", r.sender)
         put("message", r.body)
         put("sim_slot", r.sim)
@@ -34,17 +44,24 @@ object MessageSync {
     /** Insert (if new and allowed) and immediately try to deliver a single incoming SMS. */
     fun handleIncoming(context: Context, sender: String, body: String, sim: Int, receivedAt: Long, smsKey: String) {
         if (receivedAt > Prefs.lastSmsTimestamp) Prefs.lastSmsTimestamp = receivedAt
-        if (!passesFilter(sender, body)) return // not from an allowed number, or wrong prefix
+        if (!passesFilter(sender, body)) return
 
         val db = DbHelper.get(context)
-        val id = db.insertIfNew(sender, body, sim, receivedAt, smsKey)
-        if (id == -1L) return // duplicate, already known
+        // Check + insert together so the live copy and the inbox copy of one SMS never both get in.
+        val id = synchronized(insertLock) {
+            if (db.existsSimilar(sender, body, receivedAt)) -1L
+            else db.insertIfNew(sender, body, sim, receivedAt, smsKey)
+        }
+        if (id == -1L) return
         val record = MessageRecord(id, smsKey, sender, body, sim, receivedAt, null, MessageRecord.MODE_QUEUED, false, false)
         attemptDeliver(context, record)
     }
 
-    /** Try main server, then local server, according to the two independent toggles. Fails fast (short timeouts) so a burst of SMS never queues up. */
-    fun attemptDeliver(context: Context, record: MessageRecord) {
+    /**
+     * Try main server, then local server, according to the two independent toggles.
+     * Returns true only if the main server accepted the message.
+     */
+    fun attemptDeliver(context: Context, record: MessageRecord): Boolean {
         val db = DbHelper.get(context)
         val payload = payloadFor(record)
         val onlineOn = Prefs.onlineEnabled
@@ -56,7 +73,7 @@ object MessageSync {
             if (deliveredMain) {
                 val mode = if (record.syncedLocal) "QUEUED_THEN_SENT" else MessageRecord.MODE_ONLINE
                 db.markSyncedMain(record.id, System.currentTimeMillis(), mode)
-                return
+                return true
             }
         }
 
@@ -66,13 +83,26 @@ object MessageSync {
                 db.markSyncedLocal(record.id, MessageRecord.MODE_OFFLINE)
             }
         }
+        return false
     }
 
-    /** Re-try every message not yet confirmed on the main server. Called on every fast service tick. */
+    /** Re-try messages not yet confirmed on the main server, with growing delays between attempts. */
     fun flushPending(context: Context) {
         val db = DbHelper.get(context)
+        val now = System.currentTimeMillis()
         for (record in db.getPendingMain()) {
-            attemptDeliver(context, record)
+            val due = nextRetryAt[record.id] ?: 0L
+            if (now < due) continue
+
+            if (attemptDeliver(context, record)) {
+                nextRetryAt.remove(record.id)
+                failCount.remove(record.id)
+            } else {
+                val fails = (failCount[record.id] ?: 0) + 1
+                failCount[record.id] = fails
+                val stepSec = BACKOFF_STEPS_SEC[minOf(fails - 1, BACKOFF_STEPS_SEC.size - 1)]
+                nextRetryAt[record.id] = System.currentTimeMillis() + stepSec * 1000L
+            }
         }
     }
 
