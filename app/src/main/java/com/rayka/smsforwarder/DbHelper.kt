@@ -187,6 +187,15 @@ class DbHelper(context: Context) : SQLiteOpenHelper(context.applicationContext, 
         }
     }
 
+    /** "SENT" or "FAILED" for a command we already handled, null if unknown. */
+    fun outgoingStatus(remoteId: String): String? {
+        synchronized(lock) {
+            readableDatabase.rawQuery(
+                "SELECT status FROM $TABLE_OUT WHERE remote_id=? LIMIT 1", arrayOf(remoteId)
+            ).use { return if (it.moveToFirst()) it.getString(0) else null }
+        }
+    }
+
     fun insertOutgoing(remoteId: String, phone: String, body: String, mode: String, status: String) {
         synchronized(lock) {
             val cv = ContentValues().apply {
