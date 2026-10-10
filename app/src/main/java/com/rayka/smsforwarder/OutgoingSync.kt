@@ -50,10 +50,21 @@ object OutgoingSync {
             val phone = obj.optString("phone", obj.optString("number", ""))
             val body = obj.optString("message", obj.optString("body", ""))
             if (remoteId.isBlank() || phone.isBlank() || body.isBlank()) continue
-            if (db.outgoingAlreadyHandled(remoteId)) continue
+
+            if (db.outgoingAlreadyHandled(remoteId)) {
+                // The server still lists it as queued => our earlier confirmation was lost. Confirm again (never re-send the SMS).
+                if (mode == MessageRecord.MODE_ONLINE) {
+                    val st = db.outgoingStatus(remoteId)
+                    if (st != null) NetworkUtils.postOutgoingAck(remoteId, if (st == "SENT") "sent" else "failed", if (st == "SENT") null else "send failed")
+                }
+                continue
+            }
 
             val sent = sendSms(phone, body)
             db.insertOutgoing(remoteId, phone, body, mode, if (sent) "SENT" else "FAILED")
+            if (mode == MessageRecord.MODE_ONLINE) {
+                NetworkUtils.postOutgoingAck(remoteId, if (sent) "sent" else "failed", if (sent) null else "send failed")
+            }
         }
     }
 
