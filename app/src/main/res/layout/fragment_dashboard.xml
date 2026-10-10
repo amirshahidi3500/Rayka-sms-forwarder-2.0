@@ -179,7 +179,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
-                android:hint="رمز مشترک (X-Tasker-Secret)"
+                android:hint="کلید اتصال (relay_key از تنظیمات داشبورد)"
                 app:boxBackgroundColor="@color/bg_dark_2"
                 app:hintTextColor="@color/text_secondary">
                 <com.google.android.material.textfield.TextInputEditText
