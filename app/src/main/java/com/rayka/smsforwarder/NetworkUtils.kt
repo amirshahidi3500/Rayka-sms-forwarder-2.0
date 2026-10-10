@@ -24,11 +24,25 @@ object NetworkUtils {
                 caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
     }
 
-    /** The edge function checks the shared secret in the X-Tasker-Secret header. */
+    /**
+     * The key field in the app holds the host's relay_key (starts with "rk_", shown in the
+     * dashboard under Settings). It is sent in the X-Relay-Key header. Any other value is treated
+     * as the old shared secret and sent as X-Tasker-Secret (kept only for the transition period).
+     */
     private fun secretHeaders(): Map<String, String> {
         val key = Prefs.supabaseKey.trim()
         if (key.isEmpty()) return emptyMap()
-        return mapOf("X-Tasker-Secret" to key)
+        return if (key.startsWith("rk_")) mapOf("X-Relay-Key" to key) else mapOf("X-Tasker-Secret" to key)
+    }
+
+    /** Tells the server whether a command SMS was really handed to the radio (status = "sent" | "failed"). */
+    fun postOutgoingAck(remoteId: String, status: String, error: String? = null): Boolean {
+        val json = JSONObject().apply {
+            put("id", remoteId)
+            put("status", status)
+            if (!error.isNullOrBlank()) put("error", error)
+        }
+        return postJson(Prefs.outgoingMainUrl, json, DEFAULT_TIMEOUT_MS, secretHeaders())
     }
 
     /** Posts JSON to the main (Supabase) server, automatically attaching the shared secret header. */
